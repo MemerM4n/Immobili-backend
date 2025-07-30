@@ -28,7 +28,7 @@ async function quickTest() {
     try {
       const registerResponse = await axios.post(`${BASE_URL}/api/register`, {
         username: 'testuser' + Date.now(),
-        phone: '555-0123',
+        email: 'testuser' + Date.now() + '@example.com',
         password: 'testpass123'
       });
       console.log('✅ User registration successful');

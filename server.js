@@ -28,9 +28,9 @@ const ScooterReport = mongoose.model('ScooterReport', ScooterReportSchema);
 // Add this near your other schemas
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
-  phone: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // For production, hash this!
-  email: { type: String, default: null }, // Add email field
+  phone: { type: String, default: null }, // Keep phone as optional for existing users
   profilePicture: { type: String, default: null }, // Store image URI
 });
 const User = mongoose.model('User', UserSchema);
@@ -661,15 +661,30 @@ app.post('/api/login', express.json(), async (req, res) => {
 
 // Registration endpoint
 app.post('/api/register', express.json(), async (req, res) => {
-  const { username, phone, password } = req.body;
-  if (!username || !phone || !password) {
+  const { username, email, password } = req.body;
+  if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields required' });
   }
+  
+  // Basic email validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid email address' });
+  }
+  
   try {
-    const user = new User({ username, phone, password });
+    const user = new User({ username, email, password });
     await user.save();
     res.json({ message: 'Registration successful' });
   } catch (err) {
+    if (err.code === 11000) {
+      // Duplicate key error
+      if (err.keyPattern.username) {
+        return res.status(400).json({ error: 'Username is already taken' });
+      } else if (err.keyPattern.email) {
+        return res.status(400).json({ error: 'Email is already registered' });
+      }
+    }
     res.status(400).json({ error: err.message });
   }
 });
