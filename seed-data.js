@@ -178,7 +178,7 @@ async function seedDatabase() {
     
     console.log('🎉 Database seeded successfully!');
     console.log('\n🧪 Now you can test with:');
-    console.log('curl http://localhost:3001/api/scooter-reports');
+    console.log('curl https://localhost:3001/api/scooter-reports');
     
     process.exit(0);
   } catch (error) {

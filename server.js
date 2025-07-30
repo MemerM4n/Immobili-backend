@@ -320,20 +320,27 @@ app.get('/api/test', (req, res) => {
 // Endpoint to get scooter reports from a PDF file and save to MongoDB
 app.get('/api/scooter-reports', async (req, res) => {
   console.log('GET /api/scooter-reports endpoint called');
+  console.time('scooter-reports-total');
   try {
-    // Check if we already have processed reports in the database
+    console.time('find-existing-reports');
     const existingReports = await ScooterReport.find({});
+    console.timeEnd('find-existing-reports');
     
     if (existingReports.length === 0) {
       // Process PDF only if no reports exist (one-time initialization)
       const pdfPath = path.join(__dirname, 'pdfs', '60-Day-7-17.pdf');
       
       if (fs.existsSync(pdfPath)) {
+        console.time('read-pdf');
         const dataBuffer = fs.readFileSync(pdfPath);
         const data = await pdfParse(dataBuffer);
+        console.timeEnd('read-pdf');
+        console.time('extract-reports');
         const scooterReports = extractScooterReports(data.text);
+        console.timeEnd('extract-reports');
 
         // Save new reports to MongoDB
+        console.time('save-reports');
         for (const report of scooterReports) {
           if (report.location) {
             await ScooterReport.updateOne(
@@ -343,11 +350,14 @@ app.get('/api/scooter-reports', async (req, res) => {
             );
           }
         }
-        
+        console.timeEnd('save-reports');
         console.log(`Processed ${scooterReports.length} reports from PDF`);
       } else {
         // If no PDF, create sample data
+        console.time('extract-sample-reports');
         const sampleReports = extractScooterReports('');
+        console.timeEnd('extract-sample-reports');
+        console.time('save-sample-reports');
         for (const report of sampleReports) {
           await ScooterReport.updateOne(
             { raw: report.raw },
@@ -355,17 +365,20 @@ app.get('/api/scooter-reports', async (req, res) => {
             { upsert: true }
           );
         }
+        console.timeEnd('save-sample-reports');
         console.log('Created sample reports for demo');
       }
     }
 
-    // Return filtered reports from database (only valid crimes within USC area)
+    console.time('find-all-reports');
     const allReports = await ScooterReport.find({}).lean();
+    console.timeEnd('find-all-reports');
     console.log(`Found ${allReports.length} total reports in database`);
     
     const uscCenterCoord = { lat: 34.0224, lng: -118.2851 }; // USC center
     const maxDistanceKm = 3; // 3km radius around USC
     
+    console.time('filter-reports');
     const filteredReports = allReports.filter(report => {
       // Check if it's within USC area
       const distanceFromUSC = calculateDistance(
@@ -382,12 +395,15 @@ app.get('/api/scooter-reports', async (req, res) => {
       
       return distanceFromUSC <= maxDistanceKm && isValidCrimeReport;
     });
+    console.timeEnd('filter-reports');
     
     console.log(`Filtered ${allReports.length} reports to ${filteredReports.length} valid crimes in USC area`);
     res.json({ reports: filteredReports });
+    console.timeEnd('scooter-reports-total');
     
   } catch (err) {
     console.error('Error processing reports:', err);
+    console.timeEnd('scooter-reports-total');
     res.status(500).json({ error: err.message });
   }
 });
@@ -433,6 +449,7 @@ app.get('/api/parking-suggestions', async (req, res) => {
 
 // New endpoint to analyze route safety and suggest better parking spots
 app.post('/api/analyze-route', express.json(), async (req, res) => {
+  console.time('analyze-route-total');
   try {
     const { startLat, startLng, endLat, endLng, destinationName } = req.body;
     
@@ -440,17 +457,20 @@ app.post('/api/analyze-route', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'Start and end coordinates required' });
     }
 
-    // Get all theft reports from database
+    console.time('find-reports');
     const reports = await ScooterReport.find({}).lean();
+    console.timeEnd('find-reports');
     
-    // Calculate distance from destination to each theft report
+    console.time('filter-nearby-thefts');
     const nearbyThefts = reports.filter(report => {
       const distance = calculateDistance(endLat, endLng, report.latitude, report.longitude);
       return distance <= 0.5; // Within 0.5km of destination
     });
+    console.timeEnd('filter-nearby-thefts');
 
-    // Generate safe parking alternatives near the destination
+    console.time('generate-safe-alternatives');
     const safeAlternatives = generateSafeAlternatives(endLat, endLng, reports);
+    console.timeEnd('generate-safe-alternatives');
 
     // Use GPT-4o-mini to analyze the route and provide recommendations
     const analysisPrompt = `
@@ -467,10 +487,12 @@ app.post('/api/analyze-route', express.json(), async (req, res) => {
     Keep it simple and easy to read on mobile. Use bullet points.
     `;
 
+    console.time('openai-analysis');
     const completion = await openai.chat.completions.create({
       messages: [{ role: "user", content: analysisPrompt }],
       model: "gpt-4o-mini"
     });
+    console.timeEnd('openai-analysis');
 
     const analysis = completion.choices[0].message.content;
 
@@ -481,9 +503,11 @@ app.post('/api/analyze-route', express.json(), async (req, res) => {
       safeAlternatives: safeAlternatives,
       theftReports: nearbyThefts
     });
+    console.timeEnd('analyze-route-total');
 
   } catch (err) {
     console.error('Route analysis error:', err);
+    console.timeEnd('analyze-route-total');
     res.status(500).json({ error: err.message });
   }
 });
