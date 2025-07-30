@@ -17,6 +17,7 @@
     "mongodb": "^6.17.0",
     "mongoose": "^8.16.4",
     "openai": "^5.10.1",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "http-errors": "^2.0.0"
   }
 }
