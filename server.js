@@ -878,6 +878,244 @@ app.delete('/api/community-posts/:postId', express.json(), async (req, res) => {
   }
 });
 
+// Google Places API endpoint for enhanced address suggestions
+app.get('/api/places-autocomplete', async (req, res) => {
+  try {
+    const { input, sessiontoken } = req.query;
+    
+    if (!input) {
+      return res.status(400).json({ error: 'Input parameter is required' });
+    }
+
+    const GOOGLE_MAPS_APIKEY = process.env.GOOGLE_MAPS_APIKEY || 'AIzaSyASv3U2e0Td2KUAjvnBii1Oj2CcxLCZdhc';
+    
+    // USC coordinates for location bias
+    const uscLocation = '34.0224,-118.2851';
+    const radius = 50000; // 50km radius
+    
+    const axios = require('axios');
+    
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_APIKEY}&components=country:us&location=${uscLocation}&radius=${radius}&types=address|establishment|geocode&sessiontoken=${sessiontoken || ''}`;
+    
+    const response = await axios.get(placesUrl);
+    
+    if (response.data.status === 'OK') {
+      // Enhanced predictions with additional USC-specific suggestions
+      let predictions = response.data.predictions;
+      
+      // Add USC-specific suggestions if input matches common USC terms
+      const uscSuggestions = generateUSCSpecificSuggestions(input);
+      
+      // Merge USC suggestions with Google Places results
+      const enhancedPredictions = [...uscSuggestions, ...predictions];
+      
+      res.json({
+        predictions: enhancedPredictions,
+        status: response.data.status
+      });
+    } else {
+      // If Google Places fails, provide AI-generated suggestions
+      const aiSuggestions = generateAISuggestions(input);
+      res.json({
+        predictions: aiSuggestions,
+        status: 'AI_FALLBACK'
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching places:', error);
+    
+    // Fallback to AI suggestions on error
+    const aiSuggestions = generateAISuggestions(req.query.input);
+    res.json({
+      predictions: aiSuggestions,
+      status: 'AI_FALLBACK',
+      error: 'Google Places API unavailable'
+    });
+  }
+});
+
+// Helper function to generate USC-specific suggestions
+function generateUSCSpecificSuggestions(input) {
+  const inputLower = input.toLowerCase();
+  const uscLocations = [
+    {
+      description: 'USC Campus, Los Angeles, CA, USA',
+      place_id: 'usc_campus_main',
+      structured_formatting: {
+        main_text: 'USC Campus',
+        secondary_text: 'Los Angeles, CA, USA'
+      },
+      isUSCSuggestion: true
+    },
+    {
+      description: 'USC Village, Los Angeles, CA, USA',
+      place_id: 'usc_village_main',
+      structured_formatting: {
+        main_text: 'USC Village',
+        secondary_text: 'Los Angeles, CA, USA'
+      },
+      isUSCSuggestion: true
+    },
+    {
+      description: 'Tommy Trojan, USC Campus, Los Angeles, CA, USA',
+      place_id: 'tommy_trojan_usc',
+      structured_formatting: {
+        main_text: 'Tommy Trojan',
+        secondary_text: 'USC Campus, Los Angeles, CA, USA'
+      },
+      isUSCSuggestion: true
+    },
+    {
+      description: 'Doheny Memorial Library, USC, Los Angeles, CA, USA',
+      place_id: 'doheny_library_usc',
+      structured_formatting: {
+        main_text: 'Doheny Memorial Library',
+        secondary_text: 'USC, Los Angeles, CA, USA'
+      },
+      isUSCSuggestion: true
+    },
+    {
+      description: 'USC Marshall School of Business, Los Angeles, CA, USA',
+      place_id: 'usc_marshall_business',
+      structured_formatting: {
+        main_text: 'USC Marshall School of Business',
+        secondary_text: 'Los Angeles, CA, USA'
+      },
+      isUSCSuggestion: true
+    }
+  ];
+  
+  return uscLocations.filter(location => 
+    location.description.toLowerCase().includes(inputLower) ||
+    location.structured_formatting.main_text.toLowerCase().includes(inputLower)
+  );
+}
+
+// Helper function to generate AI-powered suggestions
+function generateAISuggestions(input) {
+  const inputLower = input.toLowerCase();
+  const suggestions = [];
+  
+  // Common address format corrections
+  const formatCorrections = {
+    'st': 'Street',
+    'ave': 'Avenue',
+    'blvd': 'Boulevard',
+    'rd': 'Road',
+    'dr': 'Drive',
+    'ln': 'Lane',
+    'ct': 'Court',
+    'pl': 'Place'
+  };
+  
+  // Check for abbreviations and suggest full forms
+  Object.keys(formatCorrections).forEach(abbrev => {
+    if (inputLower.includes(abbrev)) {
+      const corrected = input.replace(new RegExp(abbrev, 'gi'), formatCorrections[abbrev]);
+      suggestions.push({
+        description: `${corrected}, Los Angeles, CA, USA`,
+        place_id: `ai_correction_${Date.now()}_${Math.random()}`,
+        structured_formatting: {
+          main_text: corrected,
+          secondary_text: 'Los Angeles, CA, USA'
+        },
+        isAISuggestion: true
+      });
+    }
+  });
+  
+  // USC-specific suggestions for common terms
+  if (inputLower.includes('usc') || inputLower.includes('university')) {
+    suggestions.push({
+      description: 'University of Southern California, Los Angeles, CA, USA',
+      place_id: `ai_usc_${Date.now()}`,
+      structured_formatting: {
+        main_text: 'University of Southern California',
+        secondary_text: 'Los Angeles, CA, USA'
+      },
+      isAISuggestion: true
+    });
+  }
+  
+  // General LA area suggestions
+  const laAreas = [
+    'Downtown Los Angeles',
+    'Hollywood',
+    'Beverly Hills',
+    'Santa Monica',
+    'Venice Beach',
+    'Westwood',
+    'Koreatown'
+  ];
+  
+  laAreas.forEach(area => {
+    if (area.toLowerCase().includes(inputLower) && inputLower.length > 2) {
+      suggestions.push({
+        description: `${area}, Los Angeles, CA, USA`,
+        place_id: `ai_la_${Date.now()}_${Math.random()}`,
+        structured_formatting: {
+          main_text: area,
+          secondary_text: 'Los Angeles, CA, USA'
+        },
+        isAISuggestion: true
+      });
+    }
+  });
+  
+  return suggestions.slice(0, 3); // Limit to 3 AI suggestions
+}
+
+// Enhanced geocoding endpoint with Places API integration
+app.get('/api/geocode-place', async (req, res) => {
+  try {
+    const { placeId, address } = req.query;
+    
+    if (!placeId && !address) {
+      return res.status(400).json({ error: 'Either placeId or address is required' });
+    }
+
+    const GOOGLE_MAPS_APIKEY = process.env.GOOGLE_MAPS_APIKEY || 'AIzaSyASv3U2e0Td2KUAjvnBii1Oj2CcxLCZdhc';
+    const axios = require('axios');
+    
+    let geocodeUrl;
+    
+    if (placeId) {
+      // Use Place Details API for more accurate results
+      geocodeUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${GOOGLE_MAPS_APIKEY}&fields=geometry,formatted_address,name`;
+    } else {
+      // Fallback to regular geocoding
+      geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_APIKEY}`;
+    }
+    
+    const response = await axios.get(geocodeUrl);
+    
+    if (placeId && response.data.status === 'OK') {
+      const place = response.data.result;
+      res.json({
+        status: 'OK',
+        results: [{
+          geometry: place.geometry,
+          formatted_address: place.formatted_address || place.name,
+          place_id: placeId
+        }]
+      });
+    } else if (!placeId && response.data.status === 'OK') {
+      res.json(response.data);
+    } else {
+      res.json({
+        status: response.data.status,
+        error_message: response.data.error_message || 'Geocoding failed'
+      });
+    }
+  } catch (error) {
+    console.error('Error geocoding place:', error);
+    res.status(500).json({ 
+      status: 'ERROR',
+      error: 'Geocoding service unavailable' 
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
