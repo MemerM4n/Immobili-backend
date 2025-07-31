@@ -889,6 +889,13 @@ app.get('/api/places-autocomplete', async (req, res) => {
 
     const GOOGLE_MAPS_APIKEY = process.env.GOOGLE_MAPS_APIKEY || 'AIzaSyASv3U2e0Td2KUAjvnBii1Oj2CcxLCZdhc';
     
+    // Debug logging
+    console.log('Places API Request:', {
+      input,
+      hasApiKey: !!GOOGLE_MAPS_APIKEY,
+      apiKeyPrefix: GOOGLE_MAPS_APIKEY ? GOOGLE_MAPS_APIKEY.substring(0, 10) + '...' : 'none'
+    });
+    
     // USC coordinates for location bias
     const uscLocation = '34.0224,-118.2851';
     const radius = 50000; // 50km radius
@@ -898,6 +905,12 @@ app.get('/api/places-autocomplete', async (req, res) => {
     const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_APIKEY}&components=country:us&location=${uscLocation}&radius=${radius}&types=address|establishment|geocode&sessiontoken=${sessiontoken || ''}`;
     
     const response = await axios.get(placesUrl);
+    
+    console.log('Google Places API Response:', {
+      status: response.data.status,
+      predictionsCount: response.data.predictions ? response.data.predictions.length : 0,
+      errorMessage: response.data.error_message
+    });
     
     if (response.data.status === 'OK') {
       // Enhanced predictions with additional USC-specific suggestions
@@ -914,22 +927,27 @@ app.get('/api/places-autocomplete', async (req, res) => {
         status: response.data.status
       });
     } else {
+      console.log('Google Places API failed, using AI fallback:', response.data.status);
       // If Google Places fails, provide AI-generated suggestions
       const aiSuggestions = generateAISuggestions(input);
       res.json({
         predictions: aiSuggestions,
-        status: 'AI_FALLBACK'
+        status: 'AI_FALLBACK',
+        googleStatus: response.data.status,
+        googleError: response.data.error_message
       });
     }
   } catch (error) {
-    console.error('Error fetching places:', error);
+    console.error('Error fetching places:', error.message);
+    console.error('Error details:', error.response?.data);
     
     // Fallback to AI suggestions on error
     const aiSuggestions = generateAISuggestions(req.query.input);
     res.json({
       predictions: aiSuggestions,
       status: 'AI_FALLBACK',
-      error: 'Google Places API unavailable'
+      error: 'Google Places API unavailable',
+      errorDetails: error.message
     });
   }
 });
@@ -1077,6 +1095,14 @@ app.get('/api/geocode-place', async (req, res) => {
     const GOOGLE_MAPS_APIKEY = process.env.GOOGLE_MAPS_APIKEY || 'AIzaSyASv3U2e0Td2KUAjvnBii1Oj2CcxLCZdhc';
     const axios = require('axios');
     
+    // Debug logging
+    console.log('Geocoding API Request:', {
+      placeId,
+      address,
+      hasApiKey: !!GOOGLE_MAPS_APIKEY,
+      apiKeyPrefix: GOOGLE_MAPS_APIKEY ? GOOGLE_MAPS_APIKEY.substring(0, 10) + '...' : 'none'
+    });
+    
     let geocodeUrl;
     
     if (placeId) {
@@ -1088,6 +1114,12 @@ app.get('/api/geocode-place', async (req, res) => {
     }
     
     const response = await axios.get(geocodeUrl);
+    
+    console.log('Google Geocoding API Response:', {
+      status: response.data.status,
+      hasResults: placeId ? !!response.data.result : (response.data.results && response.data.results.length > 0),
+      errorMessage: response.data.error_message
+    });
     
     if (placeId && response.data.status === 'OK') {
       const place = response.data.result;
@@ -1102,16 +1134,48 @@ app.get('/api/geocode-place', async (req, res) => {
     } else if (!placeId && response.data.status === 'OK') {
       res.json(response.data);
     } else {
+      console.log('Geocoding failed:', response.data.status, response.data.error_message);
       res.json({
         status: response.data.status,
         error_message: response.data.error_message || 'Geocoding failed'
       });
     }
   } catch (error) {
-    console.error('Error geocoding place:', error);
+    console.error('Error geocoding place:', error.message);
+    console.error('Error details:', error.response?.data);
     res.status(500).json({ 
       status: 'ERROR',
-      error: 'Geocoding service unavailable' 
+      error: 'Geocoding service unavailable',
+      errorDetails: error.message
+    });
+  }
+});
+
+// Test endpoint to verify Google Maps API key
+app.get('/api/test-google-api', async (req, res) => {
+  try {
+    const GOOGLE_MAPS_APIKEY = process.env.GOOGLE_MAPS_APIKEY || 'AIzaSyASv3U2e0Td2KUAjvnBii1Oj2CcxLCZdhc';
+    const axios = require('axios');
+    
+    // Simple test with USC coordinates
+    const testUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=34.0224,-118.2851&key=${GOOGLE_MAPS_APIKEY}`;
+    
+    const response = await axios.get(testUrl);
+    
+    res.json({
+      apiKeyStatus: !!GOOGLE_MAPS_APIKEY,
+      apiKeyPrefix: GOOGLE_MAPS_APIKEY ? GOOGLE_MAPS_APIKEY.substring(0, 10) + '...' : 'none',
+      testResponse: {
+        status: response.data.status,
+        hasResults: response.data.results && response.data.results.length > 0,
+        errorMessage: response.data.error_message
+      }
+    });
+  } catch (error) {
+    res.json({
+      apiKeyStatus: false,
+      error: error.message,
+      errorDetails: error.response?.data
     });
   }
 });
