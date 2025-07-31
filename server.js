@@ -902,7 +902,7 @@ app.get('/api/places-autocomplete', async (req, res) => {
     
     const axios = require('axios');
     
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_APIKEY}&components=country:us&location=${uscLocation}&radius=${radius}&types=address|establishment|geocode&sessiontoken=${sessiontoken || ''}`;
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_APIKEY}&components=country:us&location=${uscLocation}&radius=${radius}&sessiontoken=${sessiontoken || ''}`;
     
     const response = await axios.get(placesUrl);
     
