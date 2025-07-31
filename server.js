@@ -5,11 +5,48 @@ const pdfParse = require('pdf-parse');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const { OpenAI } = require('openai');
+const multer = require('multer');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(uploadsDir));
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
 
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
@@ -715,6 +752,63 @@ app.post('/api/update-profile-picture', express.json(), async (req, res) => {
   }
 });
 
+// Image upload endpoint for profile pictures
+app.post('/api/upload-profile-image', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Generate the full URL for the uploaded image
+    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    
+    // Update user's profile picture in database
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { profilePicture: imageUrl },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ 
+      message: 'Profile image uploaded successfully', 
+      imageUrl: imageUrl,
+      user: user
+    });
+  } catch (err) {
+    console.error('Error uploading profile image:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Image upload endpoint for post images
+app.post('/api/upload-post-image', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+
+    // Generate the full URL for the uploaded image
+    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    
+    res.json({ 
+      message: 'Post image uploaded successfully', 
+      imageUrl: imageUrl
+    });
+  } catch (err) {
+    console.error('Error uploading post image:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get user profile endpoint
 app.get('/api/user-profile/:userId', async (req, res) => {
   try {
@@ -927,25 +1021,20 @@ app.get('/api/places-autocomplete', async (req, res) => {
         status: response.data.status
       });
     } else {
-      console.log('Google Places API failed, using AI fallback:', response.data.status);
-      // If Google Places fails, provide AI-generated suggestions
-      const aiSuggestions = generateAISuggestions(input);
+      console.log('Google Places API failed:', response.data.status);
       res.json({
-        predictions: aiSuggestions,
-        status: 'AI_FALLBACK',
-        googleStatus: response.data.status,
-        googleError: response.data.error_message
+        predictions: [],
+        status: response.data.status,
+        error_message: response.data.error_message
       });
     }
   } catch (error) {
     console.error('Error fetching places:', error.message);
     console.error('Error details:', error.response?.data);
     
-    // Fallback to AI suggestions on error
-    const aiSuggestions = generateAISuggestions(req.query.input);
-    res.json({
-      predictions: aiSuggestions,
-      status: 'AI_FALLBACK',
+    res.status(500).json({
+      predictions: [],
+      status: 'ERROR',
       error: 'Google Places API unavailable',
       errorDetails: error.message
     });
@@ -1007,80 +1096,6 @@ function generateUSCSpecificSuggestions(input) {
     location.description.toLowerCase().includes(inputLower) ||
     location.structured_formatting.main_text.toLowerCase().includes(inputLower)
   );
-}
-
-// Helper function to generate AI-powered suggestions
-function generateAISuggestions(input) {
-  const inputLower = input.toLowerCase();
-  const suggestions = [];
-  
-  // Common address format corrections
-  const formatCorrections = {
-    'st': 'Street',
-    'ave': 'Avenue',
-    'blvd': 'Boulevard',
-    'rd': 'Road',
-    'dr': 'Drive',
-    'ln': 'Lane',
-    'ct': 'Court',
-    'pl': 'Place'
-  };
-  
-  // Check for abbreviations and suggest full forms
-  Object.keys(formatCorrections).forEach(abbrev => {
-    if (inputLower.includes(abbrev)) {
-      const corrected = input.replace(new RegExp(abbrev, 'gi'), formatCorrections[abbrev]);
-      suggestions.push({
-        description: `${corrected}, Los Angeles, CA, USA`,
-        place_id: `ai_correction_${Date.now()}_${Math.random()}`,
-        structured_formatting: {
-          main_text: corrected,
-          secondary_text: 'Los Angeles, CA, USA'
-        },
-        isAISuggestion: true
-      });
-    }
-  });
-  
-  // USC-specific suggestions for common terms
-  if (inputLower.includes('usc') || inputLower.includes('university')) {
-    suggestions.push({
-      description: 'University of Southern California, Los Angeles, CA, USA',
-      place_id: `ai_usc_${Date.now()}`,
-      structured_formatting: {
-        main_text: 'University of Southern California',
-        secondary_text: 'Los Angeles, CA, USA'
-      },
-      isAISuggestion: true
-    });
-  }
-  
-  // General LA area suggestions
-  const laAreas = [
-    'Downtown Los Angeles',
-    'Hollywood',
-    'Beverly Hills',
-    'Santa Monica',
-    'Venice Beach',
-    'Westwood',
-    'Koreatown'
-  ];
-  
-  laAreas.forEach(area => {
-    if (area.toLowerCase().includes(inputLower) && inputLower.length > 2) {
-      suggestions.push({
-        description: `${area}, Los Angeles, CA, USA`,
-        place_id: `ai_la_${Date.now()}_${Math.random()}`,
-        structured_formatting: {
-          main_text: area,
-          secondary_text: 'Los Angeles, CA, USA'
-        },
-        isAISuggestion: true
-      });
-    }
-  });
-  
-  return suggestions.slice(0, 3); // Limit to 3 AI suggestions
 }
 
 // Enhanced geocoding endpoint with Places API integration
