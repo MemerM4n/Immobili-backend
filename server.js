@@ -765,7 +765,11 @@ app.post('/api/upload-profile-image', upload.single('image'), async (req, res) =
     }
 
     // Generate the full URL for the uploaded image
-    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Use Railway URL in production, fallback to local for development
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://immobili-backend-production.up.railway.app'
+      : `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
     
     // Update user's profile picture in database
     const user = await User.findByIdAndUpdate(
@@ -797,7 +801,11 @@ app.post('/api/upload-post-image', upload.single('image'), async (req, res) => {
     }
 
     // Generate the full URL for the uploaded image
-    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Use Railway URL in production, fallback to local for development
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://immobili-backend-production.up.railway.app'
+      : `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
     
     res.json({ 
       message: 'Post image uploaded successfully', 
@@ -1118,25 +1126,74 @@ app.get('/api/geocode-place', async (req, res) => {
       apiKeyPrefix: GOOGLE_MAPS_APIKEY ? GOOGLE_MAPS_APIKEY.substring(0, 10) + '...' : 'none'
     });
     
+    // Handle USC-specific place IDs that we created
+    if (placeId && placeId.includes('usc_') || placeId.includes('tommy_trojan') || placeId.includes('doheny_library')) {
+      const uscLocations = {
+        'usc_campus_main': {
+          lat: 34.0224,
+          lng: -118.2851,
+          formatted_address: 'University of Southern California, Los Angeles, CA 90089, USA'
+        },
+        'usc_village_main': {
+          lat: 34.0251,
+          lng: -118.2851,
+          formatted_address: 'USC Village, Los Angeles, CA 90089, USA'
+        },
+        'tommy_trojan_usc': {
+          lat: 34.0205,
+          lng: -118.2876,
+          formatted_address: 'Tommy Trojan, USC Campus, Los Angeles, CA 90089, USA'
+        },
+        'doheny_library_usc': {
+          lat: 34.0199,
+          lng: -118.2899,
+          formatted_address: 'Doheny Memorial Library, USC, Los Angeles, CA 90089, USA'
+        },
+        'usc_marshall_business': {
+          lat: 34.0189,
+          lng: -118.2820,
+          formatted_address: 'USC Marshall School of Business, Los Angeles, CA 90089, USA'
+        }
+      };
+      
+      const location = uscLocations[placeId];
+      if (location) {
+        return res.json({
+          status: 'OK',
+          results: [{
+            geometry: {
+              location: {
+                lat: location.lat,
+                lng: location.lng
+              }
+            },
+            formatted_address: location.formatted_address,
+            place_id: placeId
+          }]
+        });
+      }
+    }
+    
     let geocodeUrl;
     
-    if (placeId) {
-      // Use Place Details API for more accurate results
+    if (placeId && !placeId.includes('usc_') && !placeId.includes('tommy_trojan') && !placeId.includes('doheny_library')) {
+      // Use Place Details API for real Google place IDs
       geocodeUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${GOOGLE_MAPS_APIKEY}&fields=geometry,formatted_address,name`;
     } else {
       // Fallback to regular geocoding
-      geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_APIKEY}`;
+      const searchAddress = address || placeId;
+      geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(searchAddress)}&key=${GOOGLE_MAPS_APIKEY}`;
     }
     
     const response = await axios.get(geocodeUrl);
     
     console.log('Google Geocoding API Response:', {
       status: response.data.status,
-      hasResults: placeId ? !!response.data.result : (response.data.results && response.data.results.length > 0),
+      hasResults: placeId && !placeId.includes('usc_') ? !!response.data.result : (response.data.results && response.data.results.length > 0),
       errorMessage: response.data.error_message
     });
     
-    if (placeId && response.data.status === 'OK') {
+    if (placeId && !placeId.includes('usc_') && response.data.status === 'OK') {
       const place = response.data.result;
       res.json({
         status: 'OK',
@@ -1146,7 +1203,7 @@ app.get('/api/geocode-place', async (req, res) => {
           place_id: placeId
         }]
       });
-    } else if (!placeId && response.data.status === 'OK') {
+    } else if ((!placeId || placeId.includes('usc_')) && response.data.status === 'OK') {
       res.json(response.data);
     } else {
       console.log('Geocoding failed:', response.data.status, response.data.error_message);
